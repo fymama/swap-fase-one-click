@@ -40,10 +40,10 @@ from .platform_detect import default_capture_backend, is_linux, is_windows
 
 logger = logging.getLogger(__name__)
 
-# Candidate device indices to probe. On Linux these map to /dev/video0..3 plus the
-# v4l2loopback-ish video10 this machine exposes; on Windows/macOS they are plain
-# camera indices. Only the genuinely capturable ones survive the frame probe.
+# Candidate indices for platforms without native enumeration APIs. Probe a wider
+# range on Windows because virtual cameras and USB webcams may appear after index 0.
 _PROBE_INDICES: tuple[int, ...] = (0, 1, 2, 3, 10)
+_WINDOWS_PROBE_INDICES: tuple[int, ...] = tuple(range(8))
 
 # Capture format: MJPG. Default 640×480 for fps headroom (D-07/D-08, Pitfall 6);
 # overridable via SWAPFASE_CAP_W / SWAPFASE_CAP_H env vars to trade fps for a
@@ -129,15 +129,22 @@ def list_capturable_devices() -> list[int]:
     default). Cross-platform: never references ``/dev`` paths.
     """
     capturable: list[int] = []
-    for idx in _PROBE_INDICES:
+    probe_indices = _WINDOWS_PROBE_INDICES if is_windows() else _PROBE_INDICES
+    for idx in probe_indices:
         for backend in _candidate_backends():
             cap = cv2.VideoCapture(idx, backend)
             try:
                 if not cap.isOpened():
                     continue
-                ok, frame = cap.read()
-                if ok and frame is not None:
-                    capturable.append(idx)
+                # Some Windows camera backends need a moment to deliver their
+                # first frame after opening; tolerate a few warm-up misses.
+                for _ in range(3):
+                    ok, frame = cap.read()
+                    if ok and frame is not None:
+                        capturable.append(idx)
+                        break
+                    time.sleep(0.05)
+                if capturable and capturable[-1] == idx:
                     break  # this index is good; don't try the other backend
             except cv2.error:  # a flaky node — skip it, never crash the probe
                 continue

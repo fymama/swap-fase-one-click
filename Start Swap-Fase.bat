@@ -16,9 +16,15 @@ if not exist ".venv\Scripts\python.exe" (
     pause
     exit /b 1
 )
-".venv\Scripts\python.exe" "run.py"
+if not exist ".venv\Scripts\pythonw.exe" (
+    echo pythonw.exe was not found in the project environment.
+    pause
+    exit /b 1
+)
+".venv\Scripts\pythonw.exe" "run.py"
 if errorlevel 1 (
     echo.
-    echo Swap-Fase stopped with an error. Check the message above.
-    pause
+    echo The app could not start without a console. Opening a diagnostic console...
+    ".venv\Scripts\python.exe" "run.py"
+    if errorlevel 1 pause
 )

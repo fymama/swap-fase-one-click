@@ -199,7 +199,14 @@ def ensure_models(progress: Callable[[str], None] | None = None) -> str:
 
     # 1) buffalo_l analyser pack (auto-download into project-local models/).
     if progress is not None:
-        progress("Checking face-analysis models…")
+        buffalo_dir = Path(MODELS_DIR) / "models" / "buffalo_l"
+        if buffalo_dir.is_dir() and any(buffalo_dir.glob("*.onnx")):
+            progress("Checking local face-analysis models…")
+        else:
+            progress(
+                "Downloading face-analysis models for first use. "
+                "This can take several minutes; the app will continue automatically."
+            )
     ensure_buffalo_l()
 
     # 2) inswapper swapper (manual mirror + pinned-hash fail-closed verify).

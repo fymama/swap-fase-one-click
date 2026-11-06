@@ -56,6 +56,17 @@ class SetupUiBridge(QObject):
     def camera_error(self, message: str) -> None:
         self._camera_error_handler(message)
 
+    @Slot(object)
+    def cameras_scanned(self, devices: list[int]) -> None:
+        self._window.set_camera_scan_state(devices)
+
+    @Slot(str)
+    def camera_scan_failed(self, message: str) -> None:
+        self._window.set_camera_scan_state([])
+        self._window.set_status(
+            f"Camera scan failed: {message}. Close other apps using the webcam, then scan again."
+        )
+
 
 class SetupWorker(QThread):
     """Download/verify local models and initialize inference off the UI thread."""
@@ -97,6 +108,20 @@ class SetupWorker(QThread):
             self.ready.emit(engine, devices)
         except Exception as exc:
             logger.exception("local setup failed")
+            self.failed.emit(str(exc))
+
+
+class CameraScanWorker(QThread):
+    """Re-scan webcam indices without freezing the window."""
+
+    found = Signal(object)
+    failed = Signal(str)
+
+    def run(self) -> None:
+        try:
+            self.found.emit(list_capturable_devices())
+        except Exception as exc:
+            logger.exception("camera rescan failed")
             self.failed.emit(str(exc))
 
 
@@ -142,6 +167,7 @@ def main(argv: list[str] | None = None) -> int:
         "target": None,
         "setup": None,
         "bridge": None,
+        "camera_scanner": None,
     }
 
     def stop_pipeline() -> None:
@@ -182,13 +208,11 @@ def main(argv: list[str] | None = None) -> int:
             return
         device_index = window.device_combo.currentData()
         if device_index is None:
-            devices = list_capturable_devices()
-            window.set_ready(engine.provider, devices)
-            device_index = window.device_combo.currentData()
-        if device_index is None:
             window.show_error(
                 "Camera not found",
-                "No webcam was found. Connect a camera, close other apps using it, and try again.",
+                "No webcam has been detected yet. Connect it, allow camera access in "
+                "Windows Settings > Privacy & security > Camera, close apps using it, "
+                "then select Scan cameras.",
             )
             return
 
@@ -284,10 +308,12 @@ def main(argv: list[str] | None = None) -> int:
         state.set_status(engine.provider, 0.0)
         window.set_ready(engine.provider, devices)
         window.load_button.setEnabled(True)
-        window.set_status(
-            "Ready. Choose a target photo, then press Start. "
-            + ("CPU fallback may be slow." if not engine.using_gpu else "Accelerator ready.")
-        )
+        window.set_camera_scan_state(devices)
+        if devices:
+            window.set_status(
+                "Camera found. Choose a target photo, then press Start. "
+                + ("CPU fallback may be slow." if not engine.using_gpu else "Accelerator ready.")
+            )
         if args.device is not None and args.device in devices:
             index = window.device_combo.findData(args.device)
             if index >= 0:
@@ -340,6 +366,18 @@ def main(argv: list[str] | None = None) -> int:
         setup.finished.connect(window.setup_thread_finished)
         setup.start()
 
+    def scan_cameras() -> None:
+        existing = resources["camera_scanner"]
+        if existing is not None and existing.isRunning():
+            return
+        scanner = CameraScanWorker()
+        resources["camera_scanner"] = scanner
+        scanner.found.connect(bridge.cameras_scanned)
+        scanner.failed.connect(bridge.camera_scan_failed)
+        scanner.finished.connect(window.setup_thread_finished)
+        window.set_camera_scan_state()
+        scanner.start()
+
     bridge = SetupUiBridge(
         window,
         setup_ready,
@@ -352,6 +390,7 @@ def main(argv: list[str] | None = None) -> int:
     window.start_requested.connect(start_pipeline)
     window.stop_requested.connect(stop_pipeline)
     window.retry_requested.connect(start_setup)
+    window.camera_scan_requested.connect(scan_cameras)
     window.mirror_changed.connect(state.set_mirror)
     window.swap_changed.connect(state.set_swap_enabled)
     window.device_changed.connect(lambda index: setattr(state, "device_index", index))

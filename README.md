@@ -47,7 +47,9 @@ DirectML is unavailable on older hardware, ONNX Runtime can fall back to CPU.
 
 For optional virtual-camera output, install [OBS Studio](https://obsproject.com/)
 and start its Virtual Camera, or install Unity Capture. The app reports if the
-virtual camera cannot be opened.
+virtual camera cannot be opened. OBS is not bundled or installed by this
+launcher; it is only needed for sending the processed output to other apps.
+It is **not** needed to find or use your regular webcam in the Swap-Fase preview.
 
 ### macOS
 
@@ -80,6 +82,12 @@ The UI reports model setup progress, the active inference provider, measured FPS
 and whether virtual-camera output is active. The first model download requires
 an internet connection and can be large; models remain in the project-local
 `models/` folder for offline use thereafter. Model weights are not bundled.
+
+On Windows, the app scans for webcams after model setup completes. Until then,
+the camera selector says it is checking rather than reporting a missing camera.
+If none appears afterward, check **Settings > Privacy & security > Camera**,
+close apps currently using the webcam, and click **Scan cameras**. This camera
+scan is separate from OBS and does not require OBS.
 
 ### Docker (Linux + NVIDIA only)
 

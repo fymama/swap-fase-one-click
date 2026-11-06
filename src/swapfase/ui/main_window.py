@@ -28,6 +28,7 @@ class MainWindow(QMainWindow):
     start_requested = Signal()
     stop_requested = Signal()
     retry_requested = Signal()
+    camera_scan_requested = Signal()
     device_changed = Signal(int)
     mirror_changed = Signal(bool)
     swap_changed = Signal(bool)
@@ -60,8 +61,11 @@ class MainWindow(QMainWindow):
         self.load_button.clicked.connect(self.load_photo_requested.emit)
 
         self.device_combo = QComboBox()
-        self.device_combo.addItem("Camera not found", None)
+        self.device_combo.addItem("Checking for cameras after setup…", None)
         self.device_combo.currentIndexChanged.connect(self._device_selected)
+        self.rescan_button = QPushButton("Scan cameras")
+        self.rescan_button.setEnabled(False)
+        self.rescan_button.clicked.connect(self.camera_scan_requested.emit)
 
         self.start_button = QPushButton("Start")
         self.start_button.setEnabled(False)
@@ -89,6 +93,7 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.load_button)
         controls.addWidget(self.photo_label, 1)
         controls.addWidget(self.device_combo)
+        controls.addWidget(self.rescan_button)
         controls.addWidget(self.start_button)
         controls.addWidget(self.stop_button)
 
@@ -154,6 +159,47 @@ class MainWindow(QMainWindow):
         self.device_combo.blockSignals(False)
         if devices:
             self.device_changed.emit(devices[0])
+            self.rescan_button.setText("Scan cameras")
+            self.rescan_button.setEnabled(True)
+        else:
+            self.rescan_button.setText("Scan cameras")
+            self.rescan_button.setEnabled(True)
+
+    def set_camera_scan_state(self, devices: list[int] | None = None) -> None:
+        if devices is None:
+            self._setup_busy = True
+            self.device_combo.blockSignals(True)
+            self.device_combo.clear()
+            self.device_combo.addItem("Searching for cameras…", None)
+            self.device_combo.setEnabled(False)
+            self.device_combo.blockSignals(False)
+            self.rescan_button.setText("Scanning…")
+            self.rescan_button.setEnabled(False)
+            self.set_status("Scanning webcam devices…", busy=True)
+            return
+
+        self.device_combo.blockSignals(True)
+        self.device_combo.clear()
+        if devices:
+            for device in devices:
+                self.device_combo.addItem(f"Camera {device}", device)
+            self.device_combo.setEnabled(True)
+            self.device_changed.emit(devices[0])
+            self.set_status("Camera found. Choose a target photo, then press Start.")
+        else:
+            self._setup_busy = False
+            self.device_combo.addItem("No camera found", None)
+            self.device_combo.setEnabled(False)
+            self.set_status(
+                "No webcam detected. Connect/uncover it, allow camera access in "
+                "Windows Settings > Privacy & security > Camera, close apps using it, "
+                "then select Scan cameras."
+            )
+        self.device_combo.blockSignals(False)
+        if devices:
+            self._setup_busy = False
+        self.rescan_button.setText("Scan cameras")
+        self.rescan_button.setEnabled(True)
 
     @staticmethod
     def _provider_text(provider: str) -> str:
@@ -177,6 +223,7 @@ class MainWindow(QMainWindow):
         self.stop_button.setEnabled(running)
         self.load_button.setEnabled(True)
         self.device_combo.setEnabled(not running and self.device_combo.count() > 0)
+        self.rescan_button.setEnabled(not running and not self._setup_busy)
         self.virtual_camera_check.setEnabled(not running)
 
     def show_error(self, title: str, message: str) -> None:

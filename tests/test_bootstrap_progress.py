@@ -40,7 +40,7 @@ class BootstrapProgressTests(unittest.TestCase):
             self.assertEqual(Path(destination).read_bytes(), b"abcd")
             self.assertEqual(messages, ["Downloading swap model: 50%", "Downloading swap model: 100%"])
 
-    def test_existing_models_report_setup_stages(self) -> None:
+    def test_model_setup_reports_download_and_verification_stages(self) -> None:
         messages: list[str] = []
         with tempfile.TemporaryDirectory() as directory:
             model_path = Path(directory) / bootstrap.INSWAPPER_FILENAME
@@ -52,11 +52,12 @@ class BootstrapProgressTests(unittest.TestCase):
             ):
                 result = bootstrap.ensure_models(messages.append)
 
-        self.assertEqual(result, str(model_path))
+        self.assertEqual(result, str(model_path)        )
         self.assertEqual(
             messages,
             [
-                "Checking face-analysis models…",
+                "Downloading face-analysis models for first use. "
+                "This can take several minutes; the app will continue automatically.",
                 "Verifying the local swap model…",
                 "Models are ready.",
             ],
