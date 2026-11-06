@@ -50,6 +50,16 @@ class AppState:
         with self._lock:
             self.target_face = face
 
+    def set_mirror(self, enabled: bool) -> None:
+        """Atomically update the preview mirror toggle."""
+        with self._lock:
+            self.mirror = enabled
+
+    def set_swap_enabled(self, enabled: bool) -> None:
+        """Atomically update whether frames use the cached target face."""
+        with self._lock:
+            self.swap_enabled = enabled
+
     def get_target(self) -> Any | None:
         """Read the cached source embedding atomically."""
         with self._lock:
@@ -70,3 +80,8 @@ class AppState:
         with self._lock:
             self.provider = provider
             self.fps = fps
+
+    def status_snapshot(self) -> tuple[str, float]:
+        """Read the provider and FPS together for the UI status display."""
+        with self._lock:
+            return self.provider, self.fps

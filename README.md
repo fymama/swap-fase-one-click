@@ -31,47 +31,55 @@ Everything runs **locally and offline** after a one-time model download. Nothing
 
 ---
 
-## Quick install
+## Quick start (Windows and macOS)
 
-swap-fase installs into an isolated, project-local virtual environment. The base
-dependencies live in `requirements/base.txt` and deliberately **exclude
-onnxruntime** — the platform installer picks the correct inference runtime for
-your hardware (CUDA / DirectML / ROCm / CoreML / CPU). See
-[Hardware & acceleration](#hardware--acceleration).
+For ordinary use, open the repository folder and double-click the launcher for
+your computer. It prepares an isolated `.venv` inside this folder, installs one
+platform-appropriate ONNX Runtime, and opens the desktop app. You do not need to
+copy commands into PowerShell or Terminal.
 
 ### Windows
 
-Requires **Python 3.12** and, for the virtual camera, **OBS Studio's Virtual Camera**
-(install [OBS Studio](https://obsproject.com/) once and start its Virtual Camera at least
-once, or install [Unity Capture](https://github.com/schacluck/UnityCapture)).
+Requires **Python 3.12**. Double-click **`Start Swap-Fase.bat`**. The first run
+installs the isolated environment and may take several minutes; model downloads
+then show progress in the app. Windows installs only `onnxruntime-directml`; if
+DirectML is unavailable on older hardware, ONNX Runtime can fall back to CPU.
 
-```powershell
-# from the project root, in PowerShell
-.\install.ps1
-.\.venv\Scripts\python run.py --target path\to\face.jpg
-```
+For optional virtual-camera output, install [OBS Studio](https://obsproject.com/)
+and start its Virtual Camera, or install Unity Capture. The app reports if the
+virtual camera cannot be opened.
 
-The Windows installer pulls `onnxruntime-directml`, which runs on **any** Windows GPU
-(NVIDIA, AMD, or Intel) and falls back to CPU automatically.
+### macOS
+
+Requires **Python 3.12**. Double-click **`Start Swap-Fase.command`**. First run
+creates the project-local environment; the app tries CoreML and uses CPU if that
+provider is unavailable. For virtual-camera output, install and start OBS
+Studio's Virtual Camera.
+
+If macOS blocks the downloaded script, use Finder's context menu to open it with
+Terminal. You still do not need to type setup commands.
 
 ### Linux
 
-Requires **Python 3.12**. For the virtual camera you need the `v4l2loopback`
-kernel module (see [Troubleshooting](#troubleshooting)).
+The existing command-line installer and launcher remain available:
 
 ```bash
-# from the project root
-./install.sh
-./run.sh --target path/to/face.jpg
+./install.sh --no-models
+./run.sh
 ```
 
-The Linux installer detects your GPU and installs the matching onnxruntime:
-NVIDIA → `onnxruntime-gpu[cuda,cudnn]==1.22.0`, AMD → `onnxruntime-rocm`
-(may need a custom index), Intel / no-GPU → CPU `onnxruntime`.
+The GUI opens to a preview window. Choose a clear, front-facing photo, select a
+camera if more than one is available, and press **Start**. Change the photo,
+mirror the preview, enable or disable swapping, and optionally enable a virtual
+camera from the controls. Stop releases the camera so it can be used again.
+The app starts at a conservative 640×480 capture size and 320×320 detection size;
+CPU processing may be slow, especially on older or low-memory computers, and no
+particular frame rate is guaranteed.
 
-On Linux + NVIDIA, always launch via **`./run.sh`** (not `python run.py` directly):
-it exports the venv-local CUDA `LD_LIBRARY_PATH` first so onnxruntime's CUDA
-provider finds the pip-installed CUDA/cuDNN libraries.
+The UI reports model setup progress, the active inference provider, measured FPS,
+and whether virtual-camera output is active. The first model download requires
+an internet connection and can be large; models remain in the project-local
+`models/` folder for offline use thereafter. Model weights are not bundled.
 
 ### Docker (Linux + NVIDIA only)
 
@@ -122,14 +130,11 @@ it runs on CPU (slower, but it runs).
 ## Usage
 
 ```bash
-# Linux + NVIDIA
+# Open the guided app (choose a photo from the window)
+./run.sh
+
+# Optional: launch directly with a chosen photo
 ./run.sh --target path/to/face.jpg
-
-# Windows
-.\.venv\Scripts\python run.py --target path\to\face.jpg
-
-# any platform, directly (no CUDA LD_LIBRARY_PATH export — fine for non-CUDA EPs)
-python run.py --target path/to/face.jpg
 ```
 
 ### Picking a good target photo
@@ -144,7 +149,7 @@ python run.py --target path/to/face.jpg
 
 | Flag | Meaning |
 | --- | --- |
-| `--target PATH` | the photo whose face is worn (**required**; largest face detected once and cached). |
+| `--target PATH` | optional photo to load and start immediately; otherwise choose it in the window. |
 | `--device N` | input camera index to capture from (cross-platform integer index; default: first capturable camera). |
 | `--vcam` | also publish the swapped stream to a virtual camera so call apps can use it. |
 | `--vcam-device PATH` | virtual-camera device. Linux default `/dev/video10`; Windows/macOS default auto-picked by the OBS backend. |

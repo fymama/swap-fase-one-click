@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
-"""App entrypoint — launches the live webcam face-swap skeleton.
+"""App entrypoint — launches the guided local face-swap desktop app.
 
-Wires the 3-thread keep-newest pipeline (capture → inference → PySide6 preview)
-via ``swapfase.app.main``. The target photo whose face is worn is passed through:
+The app can be opened with no arguments; choose a target photo in the window.
+For automated launches an optional photo may still be passed:
 
-    ./run.sh --target path/to/face.jpg
-
-Launch via ``./run.sh`` so the venv-local CUDA ``LD_LIBRARY_PATH`` fallback is
-exported first (so onnxruntime's CUDA EP finds the pip-installed nvidia/*/lib).
+    python run.py --target path/to/face.jpg
 """
 
 import sys

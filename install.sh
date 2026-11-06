@@ -4,7 +4,7 @@
 # -----------------------------------------------------------------------------
 # Creates an ISOLATED project-local .venv (never the global/shared Python env),
 # installs the cross-platform base deps + the ONE onnxruntime build that matches
-# this machine's OS + accelerator, then fetches the model weights once.
+# this machine's OS + accelerator, then optionally fetches the models.
 #
 #   Linux + NVIDIA   -> onnxruntime-gpu[cuda,cudnn]==1.22.0  (CUDA 12.x / cuDNN 9.x)
 #   Linux + AMD      -> onnxruntime-rocm (best effort) else CPU onnxruntime
@@ -152,57 +152,74 @@ banner "Installing cross-platform base dependencies"
 pip_install -r "$HERE/requirements/base.txt"
 
 # ----- install the matching onnxruntime -----
+# Base dependencies can install CPU onnxruntime through insightface, and a
+# previous run may have left another provider behind. Remove all variants first.
+pip_uninstall onnxruntime onnxruntime-gpu onnxruntime-directml onnxruntime-silicon onnxruntime-rocm
 banner "Installing ONNX Runtime for: $ACCEL"
+EXPECTED_RUNTIME=""
 case "$ACCEL" in
     nvidia)
         # insightface may have pulled the CPU onnxruntime transitively; remove it so
         # it never collides with onnxruntime-gpu (silent CPU fallback otherwise).
         pip_uninstall onnxruntime
         pip_install "onnxruntime-gpu[cuda,cudnn]==1.22.0"
+        EXPECTED_RUNTIME="onnxruntime-gpu"
         info "Installed onnxruntime-gpu 1.22.0 (CUDA 12.x + cuDNN 9.x, venv-local)."
         info "Launch via ./run.sh so the venv-local CUDA LD_LIBRARY_PATH is exported."
         ;;
     amd)
         info "Trying onnxruntime-rocm (ROCm build; may require a custom index)..."
         if pip_install onnxruntime-rocm; then
+            EXPECTED_RUNTIME="onnxruntime-rocm"
             info "Installed onnxruntime-rocm."
         else
             warn "onnxruntime-rocm install failed — falling back to CPU onnxruntime."
             warn "For GPU on AMD, install a ROCm wheel from AMD's index, e.g.:"
             warn "  $VPY -m pip install onnxruntime-rocm --index-url <amd-rocm-index>"
+            pip_uninstall onnxruntime-rocm
             pip_install onnxruntime
+            EXPECTED_RUNTIME="onnxruntime"
         fi
         ;;
     macos)
         info "Trying onnxruntime-silicon (CoreML build)..."
         if pip_install onnxruntime-silicon; then
+            EXPECTED_RUNTIME="onnxruntime-silicon"
             info "Installed onnxruntime-silicon (CoreML)."
         else
             warn "onnxruntime-silicon unavailable — falling back to CPU onnxruntime."
+            pip_uninstall onnxruntime-silicon
             pip_install onnxruntime
+            EXPECTED_RUNTIME="onnxruntime"
         fi
         ;;
     cpu|*)
         pip_install onnxruntime
+        EXPECTED_RUNTIME="onnxruntime"
         info "Installed CPU onnxruntime (degraded fallback — expect low FPS)."
         ;;
 esac
 
-# ----- one-time model fetch -----
+"$VPY" -c 'import sys; from importlib.metadata import distributions; names = {d.metadata.get("Name", "").lower().replace("_", "-") for d in distributions()}; choices = {"onnxruntime", "onnxruntime-gpu", "onnxruntime-directml", "onnxruntime-silicon", "onnxruntime-rocm"}; installed = names & choices; expected = sys.argv[1]; assert installed == {expected}, f"Expected only {expected}, found: {sorted(installed)}"' "$EXPECTED_RUNTIME"
+info "Verified exactly one ONNX Runtime: $EXPECTED_RUNTIME."
+
+# ----- one-time model fetch is deferred to the UI for visible progress -----
 if [ "$FETCH_MODELS" -eq 1 ]; then
     banner "Fetching model weights (one-time, ~880 MB: buffalo_l + inswapper_128)"
     info "Downloads into project-local models/ (gitignored); offline thereafter."
     "$VPY" -c "import sys; sys.path.insert(0, 'src'); from swapfase.bootstrap import ensure_models; print('inswapper:', ensure_models())"
 else
     banner "Skipping model fetch (--no-models)"
-    info "Run later with: $VPY -c \"import sys; sys.path.insert(0,'src'); from swapfase.bootstrap import ensure_models; ensure_models()\""
+    info "Model downloads will start in the app with visible status."
 fi
+
+touch "$VENV/swapfase-install.complete"
 
 # ----- next steps -----
 banner "Done. Next steps:"
 if [ "$OS" = "linux" ]; then
     info "Run the app (preferred launcher — exports venv-local CUDA libs):"
-    info "    ./run.sh --target path/to/face.jpg"
+    info "    ./run.sh"
     info ""
     info "Output to a virtual camera for Zoom/Meet/Discord:"
     info "    ./run.sh --target path/to/face.jpg --vcam"
@@ -210,7 +227,7 @@ if [ "$OS" = "linux" ]; then
     info "  device (default /dev/video10). See README.md > Virtual camera."
 else
     info "Run the app:"
-    info "    $VPY run.py --target path/to/face.jpg"
+    info "    $VPY run.py"
     info ""
     info "Output to a virtual camera for Zoom/Meet/Discord:"
     info "    $VPY run.py --target path/to/face.jpg --vcam"

@@ -43,6 +43,7 @@ import hashlib
 import os
 import urllib.request
 from pathlib import Path
+from collections.abc import Callable
 
 # --- Project-local model root -------------------------------------------------
 
@@ -111,25 +112,38 @@ def _verify_or_raise(path: str) -> None:
         )
 
 
-def _download(url: str, dest: str) -> None:
+def _download(
+    url: str, dest: str, progress: Callable[[str], None] | None = None
+) -> None:
     """Download ``url`` to ``dest`` atomically (via a ``.part`` temp file)."""
     tmp = dest + ".part"
     req = urllib.request.Request(url, headers={"User-Agent": "swapfase/0.1"})
     with urllib.request.urlopen(req) as resp, open(tmp, "wb") as out:  # noqa: S310
+        total = int(resp.headers.get("Content-Length", "0") or 0)
+        downloaded = 0
         while True:
             chunk = resp.read(_CHUNK)
             if not chunk:
                 break
             out.write(chunk)
+            downloaded += len(chunk)
+            if progress is not None and total:
+                progress(
+                    f"Downloading swap model: {downloaded * 100 // total}%"
+                )
     os.replace(tmp, dest)
 
 
-def _fetch_inswapper(dest: str) -> None:
+def _fetch_inswapper(
+    dest: str, progress: Callable[[str], None] | None = None
+) -> None:
     """Download the inswapper model, trying each mirror until one succeeds."""
     last_err: Exception | None = None
     for url in _INSWAPPER_MIRRORS:
         try:
-            _download(url, dest)
+            if progress is not None:
+                progress("Downloading swap model from a verified mirror…")
+            _download(url, dest, progress)
             return
         except Exception as exc:  # network / 404 / mirror down → try the next
             last_err = exc
@@ -168,7 +182,7 @@ def ensure_buffalo_l() -> None:
     app.prepare(ctx_id=-1, det_size=(640, 640))
 
 
-def ensure_models() -> str:
+def ensure_models(progress: Callable[[str], None] | None = None) -> str:
     """Ensure both models are present + verified in ``MODELS_DIR``; return path.
 
     1. ``buffalo_l`` auto-downloads into ``MODELS_DIR/models/buffalo_l/`` on first
@@ -184,12 +198,18 @@ def ensure_models() -> str:
     os.makedirs(MODELS_DIR, exist_ok=True)
 
     # 1) buffalo_l analyser pack (auto-download into project-local models/).
+    if progress is not None:
+        progress("Checking face-analysis models…")
     ensure_buffalo_l()
 
     # 2) inswapper swapper (manual mirror + pinned-hash fail-closed verify).
     inswapper_path = os.path.join(MODELS_DIR, INSWAPPER_FILENAME)
     if not os.path.isfile(inswapper_path):
-        _fetch_inswapper(inswapper_path)
+        _fetch_inswapper(inswapper_path, progress)
+    elif progress is not None:
+        progress("Verifying the local swap model…")
     _verify_or_raise(inswapper_path)
 
+    if progress is not None:
+        progress("Models are ready.")
     return inswapper_path

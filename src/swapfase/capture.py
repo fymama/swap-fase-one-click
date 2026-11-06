@@ -30,6 +30,8 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
+from collections.abc import Callable
 
 import cv2
 
@@ -160,11 +162,13 @@ class CaptureThread(threading.Thread):
         device_index: int,
         buffer: LatestFrameBuffer,
         state: "object",
+        error_callback: Callable[[str], None] | None = None,
     ) -> None:
         super().__init__(name="CaptureThread", daemon=True)
         self._device_index = device_index
         self._buffer = buffer
         self._state = state
+        self._error_callback = error_callback
         self._stop_flag = threading.Event()
         # Opened eagerly so a busy/absent device fails LOUDLY at construction
         # (before threads start), not silently inside run(). Tests also rely on
@@ -174,19 +178,24 @@ class CaptureThread(threading.Thread):
     def run(self) -> None:
         """Capture loop: read → put-newest, until stopped; always release."""
         label = _device_label(self._device_index)
+        read_failures = 0
         try:
             while getattr(self._state, "running", False) and not self._stop_flag.is_set():
                 ok, frame = self._cap.read()
                 if not ok or frame is None:
-                    # Transient read miss (camera hiccup / unplugged). Don't busy-
-                    # spin; log once-ish and keep trying so a brief glitch doesn't
-                    # kill the stream. A persistent failure will be visible as a
-                    # frozen preview (the UI can surface it in a later plan).
-                    logger.debug("capture read() returned no frame on %s", label)
+                    read_failures += 1
+                    if read_failures >= 30:
+                        raise CameraOpenError(
+                            f"{label} stopped returning frames. Reconnect it and try again."
+                        )
+                    time.sleep(0.03)
                     continue
+                read_failures = 0
                 self._buffer.put(frame)
-        except Exception:  # noqa: BLE001 — never let a capture error leak the device
+        except Exception as exc:  # noqa: BLE001 — report errors, then release the device
             logger.exception("capture loop crashed on %s", label)
+            if self._error_callback is not None:
+                self._error_callback(str(exc))
         finally:
             # ALWAYS release — a leaked handle keeps the device busy (Pitfall 10).
             self._cap.release()

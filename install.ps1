@@ -2,12 +2,13 @@
 # swap-fase installer  —  Windows (PowerShell)
 # -----------------------------------------------------------------------------
 # Creates an ISOLATED project-local .venv, installs the cross-platform base deps
-# + onnxruntime-directml (DmlExecutionProvider runs on ANY Windows GPU — NVIDIA /
-# AMD / Intel — with a built-in CPU fallback), then fetches the model weights once.
+# + exactly onnxruntime-directml (DmlExecutionProvider runs on Windows GPUs with
+# a built-in CPU fallback). Model downloads happen in the app with visible status.
 #
-# Usage (from a PowerShell prompt in the project root):
-#   .\install.ps1                # detect Python 3.12, install, fetch models
-#   .\install.ps1 -NoModels      # skip the one-time model download (offline)
+# Usage:
+#   Double-click "Start Swap-Fase.bat" for guided setup and launch.
+#   .\install.ps1                # prepare dependencies, then fetch models
+#   .\install.ps1 -NoModels      # defer model downloads to the app
 #
 # If you get "running scripts is disabled on this system", allow this session:
 #   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
@@ -26,6 +27,24 @@ $ErrorActionPreference = 'Stop'
 function Write-Banner($msg) { Write-Host "`n==> $msg" -ForegroundColor Cyan }
 function Write-Info($msg)   { Write-Host "    $msg" }
 function Write-Warn($msg)   { Write-Host "[!] $msg" -ForegroundColor Yellow }
+function Invoke-PipUninstall($Packages) {
+    $previousPreference = $ErrorActionPreference
+    try {
+        # Older Windows PowerShell promotes native stderr to a terminating
+        # NativeCommandError when Stop is active, even for pip's harmless
+        # "Skipping package not installed" warnings.
+        $ErrorActionPreference = 'Continue'
+        & $VPy -m pip uninstall -y $Packages 2>&1 | ForEach-Object {
+            Write-Info "$_"
+        }
+        $pipExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousPreference
+    }
+    if ($pipExitCode -ne 0) {
+        throw "pip uninstall failed with exit code $pipExitCode"
+    }
+}
 
 # Resolve the project root (this script's directory) and key paths.
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Definition
@@ -85,26 +104,36 @@ Write-Banner 'Installing cross-platform base dependencies'
 if ($LASTEXITCODE -ne 0) { throw 'base dependency install failed' }
 
 # ----- ONNX Runtime for Windows = DirectML -----
-# DmlExecutionProvider works on any Windows GPU (NVIDIA / AMD / Intel) and falls
-# back to CPU automatically. insightface may have pulled the CPU onnxruntime
-# transitively — remove it so it never collides with onnxruntime-directml.
+# insightface can install the CPU runtime. Remove every provider distribution
+# first, including stale variants from a previous install, before adding DirectML.
 Write-Banner 'Installing ONNX Runtime (DirectML) for Windows'
-& $VPy -m pip uninstall -y onnxruntime 2>$null | Out-Null
+Invoke-PipUninstall @('onnxruntime', 'onnxruntime-gpu', 'onnxruntime-directml', 'onnxruntime-silicon', 'onnxruntime-rocm')
 & $VPy -m pip install onnxruntime-directml
 if ($LASTEXITCODE -ne 0) { throw 'onnxruntime-directml install failed' }
-Write-Info 'Installed onnxruntime-directml (DmlExecutionProvider: NVIDIA/AMD/Intel + CPU fallback).'
+$runtimeCheck = @'
+from importlib.metadata import distributions
+names = {d.metadata.get("Name", "").lower().replace("_", "-") for d in distributions()}
+choices = {"onnxruntime", "onnxruntime-gpu", "onnxruntime-directml", "onnxruntime-silicon", "onnxruntime-rocm"}
+installed = names & choices
+expected = {__import__("sys").argv[1]}
+assert installed == expected, f"Expected only {expected}, found: {sorted(installed)}"
+'@
+$runtimeCheck | & $VPy -c "import sys; exec(sys.stdin.read())" 'onnxruntime-directml'
+if ($LASTEXITCODE -ne 0) { throw 'ONNX Runtime packages conflict; expected only onnxruntime-directml' }
+Write-Info 'Verified exactly one ONNX Runtime: onnxruntime-directml (DirectML with CPU fallback).'
 
-# ----- one-time model fetch -----
+# ----- model fetch is deferred to the app for visible progress -----
 if ($NoModels) {
-    Write-Banner 'Skipping model fetch (-NoModels)'
-    Write-Info "Run later with:"
-    Write-Info "  $VPy -c `"import sys; sys.path.insert(0,'src'); from swapfase.bootstrap import ensure_models; ensure_models()`""
+    Write-Banner 'Model downloads will start in the app'
 } else {
     Write-Banner 'Fetching model weights (one-time, ~880 MB: buffalo_l + inswapper_128)'
     Write-Info 'Downloads into project-local models\ (gitignored); offline thereafter.'
     & $VPy -c "import sys; sys.path.insert(0, 'src'); from swapfase.bootstrap import ensure_models; print('inswapper:', ensure_models())"
     if ($LASTEXITCODE -ne 0) { throw 'model fetch failed' }
 }
+
+$marker = Join-Path $Venv 'swapfase-install.complete'
+Set-Content -Path $marker -Value '1' -NoNewline
 
 # ----- virtual camera note (Windows) -----
 Write-Banner 'Virtual camera (for Zoom / Meet / Discord)'
@@ -116,7 +145,8 @@ Write-Info '(Alternatively install Unity Capture.) No need to keep OBS open.'
 # ----- next steps -----
 Write-Banner 'Done. Next steps:'
 Write-Info 'Run the app:'
-Write-Info '    .\.venv\Scripts\python run.py --target path\to\face.jpg'
+Write-Info '    .\.venv\Scripts\python run.py'
+Write-Info 'Choose the target photo in the app window.'
 Write-Info ''
 Write-Info 'Output to the virtual camera for video calls:'
 Write-Info '    .\.venv\Scripts\python run.py --target path\to\face.jpg --vcam'
